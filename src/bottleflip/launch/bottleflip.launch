@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+	
+	
+  <arg name="paused" default="false"/>
+  <arg name="use_sim_time" default="true"/>
+  <arg name="gui" default="true"/>
+  <arg name="headless" default="false"/>
+  <arg name="debug" default="false"/>
+
+  <!-- Load the URDF into the ROS Parameter Server -->
+  <!-- This xacro will pull in baxter_base.urdf.xacro, left_end_effector.urdf.xacro,
+                                           and right_end_effector.urdf.xacro
+       Note: if you set this to false, you MUST have set the robot_description prior
+             to launching baxter_world -->
+  <arg name="load_robot_description" default="true"/>
+  <param if="$(arg load_robot_description)" name="robot_description"
+      command="$(find xacro)/xacro.py --inorder $(find baxter_description)/urdf/baxter.urdf.xacro gazebo:=true"/>
+
+  <!-- We resume the logic in empty_world.launch, changing the name of the world to be launched -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find bottleflip)/worlds/baxterwithobj.world"/>
+    <arg name="debug" value="$(arg debug)" />
+    <arg name="gui" value="$(arg gui)" />
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <arg name="headless" value="$(arg headless)"/>
+  </include>
+
+  <!-- Load the software version into the ROS Parameter Server -->
+  <param name="rethink/software_version" value="1.2.0" />
+
+  <!-- Publish a static transform between the world and the base of the robot -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="base_to_world" args="0 0 0 0 0 0 1 world base" />
+
+
+
+   <!-- Run a python script to the send a service call to gazebo_ros to spawn a URDF robot -->
+   <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen"
+	args="-param robot_description -urdf -z 0.93 -model baxter
+	      -J baxter::right_s0 -0.272659
+	      -J baxter::right_s1 1.04701
+	      -J baxter::right_e0 -0.00123203
+	      -J baxter::right_e1 0.49262
+	      -J baxter::right_w0 -0.0806423
+	      -J baxter::right_w1 -0.0620532
+	      -J baxter::right_w2 0.0265941
+	      -J baxter::left_s0 0.192483
+	      -J baxter::left_s1 1.047
+	      -J baxter::left_e0 0.000806359
+	      -J baxter::left_e1 0.491094
+	      -J baxter::left_w0 -0.178079
+	      -J baxter::left_w1 -0.0610333
+	      -J baxter::left_w2 -0.0124707" />
+
+
+  <arg name="left_electric_gripper" default="true"/>
+  <arg name="right_electric_gripper" default="true"/>
+
+  <!-- baxter_sim_kinematics launch file to do the Forward/Inverse Kinematics -->
+  <include file="$(find baxter_sim_kinematics)/launch/baxter_sim_kinematics.launch" />
+
+  <!-- Load joint controller configurations from YAML file to parameter server -->
+  <rosparam file="$(find baxter_sim_hardware)/config/baxter_sim_controllers.yaml" command="load"/>
+  <rosparam if="$(arg left_electric_gripper)" file="$(find baxter_sim_hardware)/config/baxter_left_electric_gripper_controller.yaml" command="load"/>
+  <rosparam if="$(arg right_electric_gripper)" file="$(find baxter_sim_hardware)/config/baxter_right_electric_gripper_controller.yaml" command="load"/>
+
+  <!-- load the baxter_sim_hardware node -->
+  <node name="baxter_emulator" pkg="baxter_sim_hardware" type="baxter_emulator" respawn="false"
+	output="screen" args="$(find baxter_sim_hardware)/images/researchsdk.png">
+    <param if="$(arg left_electric_gripper)" name="left_gripper_type" value="ELECTRIC_GRIPPER" />
+    <param if="$(arg right_electric_gripper)" name="right_gripper_type" value="ELECTRIC_GRIPPER" />
+  </node>
+  <!-- load the default controllers -->
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
+        output="screen" ns="/robot" args="--shutdown-timeout -1 joint_state_controller" />
+
+  <!-- load the stopped controllers -->
+  <node name="controller_spawner_stopped" pkg="controller_manager" type="spawner" respawn="false"
+       output="screen" ns="/robot" args="--shutdown-timeout -1 --stopped
+					   left_joint_position_controller
+					   right_joint_position_controller
+					   head_position_controller
+					   left_joint_velocity_controller
+					   right_joint_velocity_controller
+					   left_joint_effort_controller
+					   right_joint_effort_controller"/>
+
+    <node if="$(arg left_electric_gripper)" name="left_gripper_controller_spawner_stopped" pkg="controller_manager" type="spawner" respawn="false"
+        output="screen" ns="/robot" args="--shutdown-timeout -1 --stopped left_gripper_controller"/>
+
+    <node if="$(arg right_electric_gripper)" name="right_gripper_controller_spawner_stopped" pkg="controller_manager" type="spawner" respawn="false"
+        output="screen" ns="/robot" args="--shutdown-timeout -1 --stopped right_gripper_controller"/>
+
+  <!-- convert joint states to TF transforms -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+	respawn="false" output="screen">
+    <remap from="/joint_states" to="/robot/joint_states" />
+  </node>
+
+  <node name="baxter_sim_io" pkg="baxter_sim_io" type="baxter_sim_io"
+	respawn="false" output="screen">
+  </node>
+<node name="joint_trajectory_action_server" pkg="bottleflip" type="joint_trajectory_action_server_smart.py"/>
+
+
+</launch>
